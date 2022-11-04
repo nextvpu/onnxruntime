@@ -186,6 +186,41 @@ TEST(ResizeOpTest, ResizeOpLinearDownSampleTest_4DBilinear_align_corners) {
 #endif
 }
 
+#if 1
+TEST(ResizeOpTest, ResizeOpLinearDownSampleTest_2DBilinear_pytorch_half_pixel) {
+  OpTester test("Resize", 13);
+  std::vector<float> roi{};
+  std::vector<float> scales{};
+  std::vector<int64_t> sizes{6, 6};
+
+  test.AddAttribute("mode", "linear");
+  test.AddAttribute("coordinate_transformation_mode", "pytorch_half_pixel");
+
+  const int64_t H = 3, W = 3;
+
+  std::vector<float> X = {
+      1.0f, 2.0f, 3.0f,
+      4.0f, 5.0f, 6.0f, 
+      7.0f, 8.0f, 9.0f};
+
+  test.AddInput<float>("X", {H, W}, X);
+  test.AddInput<float>("roi", {0}, roi);
+  test.AddInput<float>("scales", {0}, scales);
+  test.AddInput<int64_t>("sizes", {2}, sizes);
+
+  std::vector<float> Y = {
+      0.5625f, 0.9375f, 1.3125f, 1.6875f, 2.0625f, 1.6875f,
+      1.3125f, 2.f, 2.5f, 3.f, 3.5f, 2.8125f,
+      2.4375f, 3.5f, 4.f, 4.5f, 5.f, 3.9375f,
+      3.5625f, 5.f, 5.5f, 6.f, 6.5f, 5.0625f,
+      4.6875f, 6.5f, 7.f, 7.5f, 8.f, 6.1875f,
+      3.9375f, 5.4375f, 5.8125f, 6.1875f, 6.5625f, 5.0625f
+  }; 
+
+  test.AddOutput<float>("Y", {sizes[0], sizes[1]}, Y);
+  test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kTensorrtExecutionProvider});  // TensorRT: results mismatch
+}
+#else
 TEST(ResizeOpTest, ResizeOpLinearDownSampleTest_2DBilinear_pytorch_half_pixel) {
   OpTester test("Resize", 13);
   std::vector<float> roi{};
@@ -213,7 +248,7 @@ TEST(ResizeOpTest, ResizeOpLinearDownSampleTest_2DBilinear_pytorch_half_pixel) {
   test.AddOutput<float>("Y", {sizes[0], sizes[1]}, Y);
   test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kTensorrtExecutionProvider});  // TensorRT: results mismatch
 }
-
+#endif
 TEST(ResizeOpTest, ResizeOpLinearUpSampleTest_4DBilinear_asymmetric) {
   // To test NNAPI EP, we need the sclaes/sizes to be in initializers
   auto run_test = [](bool scales_in_initializer) {

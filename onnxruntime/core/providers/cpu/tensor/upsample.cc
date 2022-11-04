@@ -318,7 +318,8 @@ void UpsampleBilinear(int64_t batch_size,
                       T* YdataBase,
                       AllocatorPtr& alloc,
                       GetOriginalCoordinateFunc get_original_coordinate,
-                      concurrency::ThreadPool* tp) {
+                      concurrency::ThreadPool* tp,
+                      ResizeCoordinateTransformationMode coordinate_transform_mode) {
   std::vector<float> y_original;
   y_original.reserve(output_height);
 
@@ -421,18 +422,152 @@ void UpsampleBilinear(int64_t batch_size,
                                                             ((y_original[y] < 0 || y_original[y] > static_cast<float>(input_height - 1)) ||
                                                              (x_original[x] < 0 || x_original[x] > static_cast<float>(input_width - 1)))) {
                                                           Ydata[output_width * y + x] = static_cast<T>(extrapolation_value);
-                                                          continue;
+                                                          continue; 
                                                         }
+                                                        T X11, X21, X12, X22;
+                                                        if ((coordinate_transform_mode == PYTORCH_HALF_PIXEL || coordinate_transform_mode == HALF_PIXEL) &&
+                                                            (input_height > 1 || input_width > 1)) {
+                                                          if ((y_original[y] < 0 || y_original[y] > static_cast<float>(input_height - 1)) ||
+                                                              (x_original[x] < 0 || x_original[x] > static_cast<float>(input_width - 1))) {
+                                                            if (x_original[x] < 0) {
+                                                              float ratiox1, ratiox2;
+                                                              X11 = 0.f;
+                                                              X21 = Xdata[std::max(input_width_mul_y1[y] + in_x2[x] - 1, static_cast<int64_t>(0))];
 
-                                                        T X11 = Xdata[input_width_mul_y1[y] + in_x1[x]];
-                                                        T X21 = Xdata[input_width_mul_y1[y] + in_x2[x]];
-                                                        T X12 = Xdata[input_width_mul_y2[y] + in_x1[x]];
-                                                        T X22 = Xdata[input_width_mul_y2[y] + in_x2[x]];
+                                                              int64_t lft = static_cast<int64_t>(floor(x_original[x]));
+                                                              //int64_t rght = lft + 1;
+                                                              ratiox2 = x_original[x] - lft;
+                                                              ratiox1 = 1 - ratiox2;
+                                                              //T X211 = Xdata[input_width_mul_y1[y] + rght];
+                                                              //assert(X211 == X21);
+                                                              T y1 = ratiox1 * X11 + ratiox2 * X21;
+                                                              if (y_original[y] < 0) {
+                                                                T y0 = 0;
+                                                                float ratioy1, ratioy2;
+                                                                int64_t top = static_cast<int64_t>(floor(y_original[y]));
+                                                                //int64_t bottom = top + 1;
+                                                                ratioy2 = y_original[y] - top;
+                                                                ratioy1 = 1 - ratiox2;
+                                                                Ydata[output_width * y + x] = static_cast<T>(ratioy1 * y0 + ratioy2 * y1);
+                                                              } else if (y_original[y] > static_cast<float>(input_height - 1)) {
+                                                                T y2 = 0;
+                                                                float ratioy1, ratioy2;
+                                                                int64_t top = static_cast<int64_t>(floor(y_original[y]));
+                                                                //int64_t bottom = top + 1;
+                                                                ratioy2 = y_original[y] - top;
+                                                                ratioy1 = 1 - ratioy2;
+                                                                Ydata[output_width * y + x] = static_cast<T>(ratioy1 * y1 + ratioy2 * y2);
 
-                                                        Ydata[output_width * y + x] = static_cast<T>(dx2[x] * dy2[y] * X11 +
-                                                                                                     dx1[x] * dy2[y] * X21 +
-                                                                                                     dx2[x] * dy1[y] * X12 +
-                                                                                                     dx1[x] * dy1[y] * X22);
+                                                              } else {
+                                                                float ratioy1, ratioy2;
+                                                                int64_t top = static_cast<int64_t>(floor(y_original[y]));
+                                                                int64_t bottom = top + 1;
+                                                                ratioy2 = y_original[y] - top;
+                                                                ratioy1 = 1 - ratioy2;
+
+                                                                X12 = 0;
+                                                                X22 = Xdata[input_width_mul_y2[y] + in_x1[x]];
+                                                                T y2 = ratiox1 * X12 + ratiox2 * X22;
+
+                                                                Ydata[output_width * y + x] = static_cast<T>(ratioy1 * y1 + ratioy2 * y2);
+                                                              }
+                                                            } else if (x_original[x] > static_cast<float>(input_width - 1)) {
+                                                              float ratiox1, ratiox2;
+                                                              X11 = Xdata[input_width_mul_y1[y] + in_x1[x]];
+                                                              X21 = 0.f;
+
+                                                              int64_t lft = static_cast<int64_t>(floor(x_original[x]));
+                                                              int64_t rght = lft + 1;
+                                                              ratiox2 = x_original[x] - lft;
+                                                              ratiox1 = 1 - ratiox2;
+                                                              T X211 = Xdata[input_width_mul_y1[y] + lft];
+                                                              assert(X211 == X11);
+                                                              T y1 = ratiox1 * X11 + ratiox2 * X21;
+                                                              if (y_original[y] < 0) {
+                                                                T y0 = 0;
+                                                                float ratioy1, ratioy2;
+                                                                int64_t top = static_cast<int64_t>(floor(y_original[y]));
+                                                                int64_t bottom = top + 1;
+                                                                ratioy2 = y_original[y] - top;
+                                                                ratioy1 = 1 - ratioy2;
+                                                                Ydata[output_width * y + x] = static_cast<T>(ratioy1 * y0 + ratioy2 * y1);
+
+                                                              } else if (y_original[y] > static_cast<float>(input_height - 1)) {  //1
+                                                                T y2 = 0;
+                                                                float ratioy1, ratioy2;
+                                                                int64_t top = static_cast<int64_t>(floor(y_original[y]));
+                                                                int64_t bottom = top + 1;
+                                                                ratioy2 = y_original[y] - top;
+                                                                ratioy1 = 1 - ratioy2;
+                                                                Ydata[output_width * y + x] = static_cast<T>(ratioy1 * y1 + ratioy2 * y2);
+
+                                                              } else {
+                                                                float ratioy1, ratioy2;
+                                                                int64_t top = static_cast<int64_t>(floor(y_original[y]));
+                                                                int64_t bottom = top + 1;
+                                                                ratioy2 = y_original[y] - top;
+                                                                ratioy1 = 1 - ratioy2;
+
+                                                                X12 = Xdata[input_width_mul_y2[y] + in_x1[x]];
+                                                                X22 = 0;
+                                                                T y2 = ratiox1 * X12 + ratiox2 * X22;
+
+                                                                Ydata[output_width * y + x] = static_cast<T>(ratioy1 * y1 + ratioy2 * y2);
+                                                              }
+                                                            } else {
+                                                              float ratiox1, ratiox2;
+                                                              X11 = Xdata[input_width_mul_y1[y] + in_x1[x]];
+                                                              X21 = Xdata[input_width_mul_y1[y] + in_x2[x]];
+
+                                                              int64_t lft = static_cast<int64_t>(floor(x_original[x]));
+                                                              int64_t rght = lft + 1;
+                                                              ratiox2 = x_original[x] - lft;
+                                                              ratiox1 = 1 - ratiox2;
+                                                              //float X211 = Xdata[input_width_mul_y1[y] + rght];
+                                                              //assert(X211 == X21);
+                                                              T y1 = ratiox1 * X11 + ratiox2 * X21;
+                                                              if (y_original[y] < 0) {
+                                                                T y0 = 0;
+                                                                float ratioy1, ratioy2;
+                                                                int64_t top = static_cast<int64_t>(floor(y_original[y]));
+                                                                int64_t bottom = top + 1;
+                                                                ratioy2 = y_original[y] - top;
+                                                                ratioy1 = 1 - ratioy2;
+                                                                Ydata[output_width * y + x] = static_cast<T>(ratioy1 * y0 + ratioy2 * y1);
+                                                              } else if (y_original[y] > static_cast<float>(input_height - 1)) {  //ͬ1
+                                                                T y2 = 0;
+                                                                float ratioy1, ratioy2;
+                                                                int64_t top = static_cast<int64_t>(floor(y_original[y]));
+                                                                int64_t bottom = top + 1;
+                                                                ratioy2 = y_original[y] - top;
+                                                                ratioy1 = 1 - ratioy2;
+                                                                Ydata[output_width * y + x] = static_cast<T>(ratioy1 * y1 + ratioy2 * y2);
+                                                              } else {
+                                                                //cout << "444" << endl;
+                                                              }
+                                                            }
+                                                          } else {
+                                                            X11 = Xdata[input_width_mul_y1[y] + in_x1[x]];
+                                                            X21 = Xdata[input_width_mul_y1[y] + in_x2[x]];
+                                                            X12 = Xdata[input_width_mul_y2[y] + in_x1[x]];
+                                                            X22 = Xdata[input_width_mul_y2[y] + in_x2[x]];
+
+                                                            Ydata[output_width * y + x] = static_cast<T>(dx2[x] * dy2[y] * X11 +
+                                                                                                         dx1[x] * dy2[y] * X21 +
+                                                                                                         dx2[x] * dy1[y] * X12 +
+                                                                                                         dx1[x] * dy1[y] * X22);
+                                                          }
+                                                        } else {
+                                                          X11 = Xdata[input_width_mul_y1[y] + in_x1[x]];
+                                                          X21 = Xdata[input_width_mul_y1[y] + in_x2[x]];
+                                                          X12 = Xdata[input_width_mul_y2[y] + in_x1[x]];
+                                                          X22 = Xdata[input_width_mul_y2[y] + in_x2[x]];
+
+                                                          Ydata[output_width * y + x] = static_cast<T>(dx2[x] * dy2[y] * X11 +
+                                                                                                       dx1[x] * dy2[y] * X21 +
+                                                                                                       dx2[x] * dy1[y] * X12 +
+                                                                                                       dx1[x] * dy1[y] * X22);
+                                                        }
                                                       }
                                                     }
                                                     Xdata += input_height * input_width;
@@ -904,7 +1039,7 @@ Status Upsample<T>::BaseCompute(OpKernelContext* context,
                          is_2D ? scales[0] : scales[2], is_2D ? scales[1] : scales[3], roi,
                          use_extrapolation_, extrapolation_value_, X->template Data<T>(),
                          Y->template MutableData<T>(), alloc, get_original_coordinate_, 
-                         output_height*output_width > 64 ? context->GetOperatorThreadPool() : nullptr);
+                         output_height * output_width > 64 ? context->GetOperatorThreadPool() :  nullptr, coordinate_transform_mode_);
         return Status::OK();
       } else if (dims.size() == 3 || dims.size() == 5) {
         //'trilinear' == 3-D input or 5-D input with outermost 2 scales as 1
