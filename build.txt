@@ -1,0 +1,57 @@
+
+1. 下载v1.8.1代码
+有第三方仓库依赖，需要下载完整仓库，网络不好可能需要很多次下载，
+如果代码没有下载完整，第二步会检查并继续下载。
+
+2. cd onnx-runtime，cmd执行
+build.bat --build_wheel --build_shared_lib --enable_pybind --cmake_generator "Visual Studio 16 2019"
+看文档支持2017，实测2017会报语法错误，使用2019可以通过。
+这条命令我本地没能完全通过，中间报错停止。
+
+但是生成了vs工程。
+进入onnx-runtime\build\Windows\Debug，vs2019打开ALL_BUILD.vcxproj或onnxruntime.sln文件，切换到Release配置项，编译。
+部分工程通不过需要定位到报错的工程，属性-配置属性-C/C++-常规-将警告视为错误，是(/WX)修改为否(/WX-)，编译。
+等待所有工程全部通过。
+
+3. 完成后在onnx-runtime\build\Windows\Debug\Release目录下生成了onnxruntime目录，手动重新组织为如下结构
+
+|----onnxruntime
+ ----MANIFEST.in
+ ----setup.py
+MANIFEST.in内容如下
+recursive-include onnxruntime *.pyd *.dll
+setup.py内容如下
+import setuptools
+packages = [
+    'onnxruntime',
+    'onnxruntime.backend',
+    'onnxruntime.capi',
+    'onnxruntime.capi.training',
+    'onnxruntime.datasets',
+    'onnxruntime.tools',
+    'onnxruntime.tools.ort_format_model',
+    'onnxruntime.tools.ort_format_model.ort_flatbuffers_py',
+    'onnxruntime.tools.ort_format_model.ort_flatbuffers_py.experimental',
+    'onnxruntime.tools.ort_format_model.ort_flatbuffers_py.experimental.fbs',
+    'onnxruntime.quantization',
+    'onnxruntime.quantization.operators',
+    'onnxruntime.quantization.CalTableFlatBuffers',
+    'onnxruntime.transformers',
+    'onnxruntime.transformers.longformer',
+]
+setuptools.setup(
+name='onnxruntime',
+version='1.8.1m',
+description='ONNX Runtime is a runtime accelerator for Machine Learning models',
+long_description='ONNX Runtime is a runtime accelerator for Machine Learning models',
+author='Microsoft Corporation',
+author_email='onnxruntime@microsoft.com',
+packages=packages,
+include_package_data=True,
+)
+执行命令
+python setup.py bdist_wheel 
+完成后，生成结果的dist目录
+
+即获取可安装的onnxruntime-1.8.1m-py3-none-any.whl文件
+
